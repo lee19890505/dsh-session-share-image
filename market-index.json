@@ -1,0 +1,44 @@
+{
+  "format": 1,
+  "title": {
+    "en": "lee's DSH plugins",
+    "zh": "lee 的 DSH 插件"
+  },
+  "description": {
+    "en": "DeepSeek Harness plugin bundles published from github.com/lee19890505.",
+    "zh": "由 github.com/lee19890505 发布的 DeepSeek Harness 插件。"
+  },
+  "plugins": [
+    {
+      "name": "dsh-session-share-image",
+      "title": {
+        "en": "Session share image",
+        "zh": "会话分享图片"
+      },
+      "description": {
+        "en": "Adds a Share as image pill beside the composer. Pick any messages of the current conversation, preview the result in light or dark, then copy the image to the clipboard or download it as one PNG.",
+        "zh": "在输入框旁增加“分享为图片”按钮。勾选当前会话里的任意消息，浅色/深色实时预览，然后把图片复制到剪贴板或下载成一张 PNG。"
+      },
+      "icon": "https://raw.githubusercontent.com/lee19890505/dsh-session-share-image/e5e8a8d8b8146d3b40bb2bf0089673eb6c4d25a5/icon.svg",
+      "author": "lee19890505",
+      "homepage": "https://github.com/lee19890505/dsh-session-share-image",
+      "repository": {
+        "url": "https://github.com/lee19890505/dsh-session-share-image"
+      },
+      "metadata": {
+        "keywords": ["dsh", "deepseek-harness", "plugin", "session", "export", "image"]
+      },
+      "versions": [
+        {
+          "version": "1.0.0",
+          "publishTimestamp": 1795082093,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lee19890505/dsh-session-share-image.git",
+            "commit": "e5e8a8d8b8146d3b40bb2bf0089673eb6c4d25a5"
+          }
+        }
+      ]
+    }
+  ]
+}
