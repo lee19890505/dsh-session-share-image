@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Session share image: pick messages from the current conversation and export
  * them as one PNG, so a transcript can be shared without a screenshot.
  *
@@ -1168,6 +1168,9 @@ window.__ModuleLoader__.load({
 
       const onPointerDown = (event) => {
         if (event.button !== 0) return
+        // Never capture the pointer over a control: capture retargets the
+        // follow-up click to this element, so the button would never fire.
+        if (event.target && typeof event.target.closest === 'function' && event.target.closest('button')) return
         movedRef.current = false
         dragRef.current = {
           id: event.pointerId,
