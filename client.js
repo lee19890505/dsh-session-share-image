@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Session share image: pick messages from the current conversation and export
  * them as one PNG, so a transcript can be shared without a screenshot.
  *
@@ -1133,12 +1133,16 @@ window.__ModuleLoader__.load({
       return Math.min(max, Math.max(min, value))
     }
 
-    /** Full-window image preview: wheel zoom, drag to pan, copy/download at the bottom. */
+    /**
+     * Floating preview surface: the dark panel is inset so the app's own window
+     * chrome (including the native caption buttons) stays visible around it.
+     * Clicking the margin closes; the image fills the panel width by default,
+     * pans by drag, and zooms with the wheel.
+     */
     function Lightbox(props) {
       const { url, t, onClose, onCopy, onDownload, status, downloadDisabled, layer } = props
       const stageRef = React.useRef(null)
       const rootRef = React.useRef(null)
-      const imageRef = React.useRef(null)
       const dragRef = React.useRef(null)
       const movedRef = React.useRef(false)
 
@@ -1146,18 +1150,17 @@ window.__ModuleLoader__.load({
       const view = viewState[0]
       const setView = viewState[1]
 
+      const naturalState = React.useState(0)
+      const naturalWidth = naturalState[0]
+      const setNaturalWidth = naturalState[1]
+
       React.useEffect(() => {
         const node = rootRef.current
         if (!node) return undefined
         const onWheel = (event) => {
           event.preventDefault()
           const factor = Math.exp(-event.deltaY * 0.0018)
-          setView((prev) => {
-            const scale = clamp(prev.scale * factor, 0.2, 6)
-            return scale <= 1.001
-              ? { scale: 1, x: 0, y: 0 }
-              : { scale, x: prev.x, y: prev.y }
-          })
+          setView((prev) => ({ scale: clamp(prev.scale * factor, 0.2, 6), x: prev.x, y: prev.y }))
         }
         node.addEventListener('wheel', onWheel, { passive: false })
         return () => node.removeEventListener('wheel', onWheel)
@@ -1179,13 +1182,11 @@ window.__ModuleLoader__.load({
 
       const onPointerMove = (event) => {
         const drag = dragRef.current
-        if (!drag || drag.id !== event.pointerId || view.scale <= 1.001) return
+        if (!drag || drag.id !== event.pointerId) return
         const dx = event.clientX - drag.startX
         const dy = event.clientY - drag.startY
         if (!movedRef.current && Math.abs(dx) + Math.abs(dy) > 4) movedRef.current = true
-        if (movedRef.current) {
-          setView({ scale: view.scale, x: drag.ox + dx, y: drag.oy + dy })
-        }
+        if (movedRef.current) setView({ scale: view.scale, x: drag.ox + dx, y: drag.oy + dy })
       }
 
       const onPointerUp = (event) => {
@@ -1194,6 +1195,19 @@ window.__ModuleLoader__.load({
         dragRef.current = null
         try { event.currentTarget.releasePointerCapture(event.pointerId) } catch (error) { /* ignore */ }
         if (!movedRef.current && drag.onBackground) onClose()
+      }
+
+      const pillStyle = {
+        height: '32px',
+        padding: '0 14px',
+        borderRadius: '8px',
+        border: '1px solid rgba(255,255,255,.24)',
+        background: 'rgba(12,16,24,.72)',
+        color: '#ffffff',
+        fontSize: '13px',
+        fontFamily: 'inherit',
+        lineHeight: '1',
+        cursor: 'pointer',
       }
 
       const bottomBar = h('div', {
@@ -1207,7 +1221,7 @@ window.__ModuleLoader__.load({
           justifyContent: 'center',
           gap: '10px',
           padding: '14px 20px 18px',
-          background: 'linear-gradient(to top, rgba(4,7,12,.92), rgba(4,7,12,0))',
+          background: 'linear-gradient(to top, rgba(4,7,12,.94), rgba(4,7,12,0))',
         },
       },
       h('button', {
@@ -1215,18 +1229,11 @@ window.__ModuleLoader__.load({
         onClick: () => setView({ scale: 1, x: 0, y: 0 }),
         title: t('resetZoom'),
         style: {
-          height: '32px',
+          ...pillStyle,
           minWidth: '62px',
           padding: '0 12px',
-          borderRadius: '8px',
-          border: '1px solid rgba(255,255,255,.22)',
-          background: 'rgba(12,16,24,.7)',
-          color: '#ffffff',
           fontSize: '12px',
-          fontFamily: 'inherit',
           fontVariantNumeric: 'tabular-nums',
-          lineHeight: '1',
-          cursor: 'pointer',
         },
       }, Math.round(view.scale * 100) + '%'),
       h('button', {
@@ -1234,17 +1241,9 @@ window.__ModuleLoader__.load({
         onClick: onCopy,
         disabled: downloadDisabled,
         style: {
-          height: '32px',
-          padding: '0 14px',
-          borderRadius: '8px',
-          border: '1px solid rgba(255,255,255,.28)',
-          background: 'rgba(12,16,24,.7)',
-          color: '#ffffff',
-          fontSize: '13px',
-          fontFamily: 'inherit',
-          lineHeight: '1',
-          cursor: downloadDisabled ? 'default' : 'pointer',
+          ...pillStyle,
           opacity: downloadDisabled ? 0.45 : 1,
+          cursor: downloadDisabled ? 'default' : 'pointer',
         },
       }, t('copy')),
       h('button', {
@@ -1267,60 +1266,75 @@ window.__ModuleLoader__.load({
         },
       }, t('download')),
       status ? h('span', {
-        style: { fontSize: '11px', color: 'rgba(255,255,255,.68)', marginLeft: '4px', marginRight: '4px' },
-      }, status) : null,
-      h('button', {
+        style: { fontSize: '11px', color: 'rgba(255,255,255,.68)', marginLeft: '4px' },
+      }, status) : null)
+
+      const panelClose = h('button', {
         type: 'button',
         onClick: onClose,
         'aria-label': t('cancel'),
         title: t('cancel'),
         style: {
-          height: '32px',
-          padding: '0 14px',
+          position: 'absolute',
+          top: '10px',
+          right: '10px',
+          zIndex: 2,
+          width: '30px',
+          height: '30px',
           borderRadius: '8px',
-          border: '1px solid rgba(255,255,255,.22)',
-          background: 'rgba(12,16,24,.7)',
+          border: '1px solid rgba(255,255,255,.2)',
+          background: 'rgba(12,16,24,.72)',
           color: '#ffffff',
-          fontSize: '13px',
-          fontFamily: 'inherit',
+          fontSize: '15px',
           lineHeight: '1',
           cursor: 'pointer',
         },
-      }, t('cancel')))
+      }, '\u00d7')
 
-      const stage = h('div', {
-        ref: stageRef,
+      const imageWrap = h('div', {
         style: {
           position: 'absolute',
           inset: 0,
+          padding: '22px 22px 78px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          padding: '20px 20px 78px',
-          cursor: view.scale > 1 ? 'grab' : 'zoom-out',
-          touchAction: 'none',
-          userSelect: 'none',
+          overflow: 'hidden',
         },
-        onPointerDown,
-        onPointerMove,
-        onPointerUp,
-        onPointerCancel: onPointerUp,
       }, h('img', {
-        ref: imageRef,
         src: url,
         alt: t('previewAlt'),
         draggable: false,
+        onLoad: (event) => setNaturalWidth(event.target.naturalWidth || 0),
         style: {
-          maxWidth: '100%',
-          maxHeight: '100%',
-          objectFit: 'contain',
+          width: '100%',
+          height: 'auto',
+          maxWidth: naturalWidth ? naturalWidth + 'px' : '100%',
+          maxHeight: 'none',
           borderRadius: '6px',
-          boxShadow: '0 24px 80px rgba(0,0,0,.6)',
+          boxShadow: '0 18px 60px rgba(0,0,0,.55)',
           transform: 'translate(' + view.x + 'px, ' + view.y + 'px) scale(' + view.scale + ')',
           transition: dragRef.current ? 'none' : 'transform .08s ease-out',
-          cursor: view.scale > 1 ? 'grab' : 'zoom-in',
+          cursor: 'grab',
         },
       }))
+
+      // Top inset leaves the window's own title bar (and its caption buttons)
+      // outside the panel, so hovering that corner no longer looks like ours.
+      const panel = h('div', {
+        style: {
+          position: 'absolute',
+          top: '36px',
+          left: '28px',
+          right: '28px',
+          bottom: '28px',
+          borderRadius: '12px',
+          background: 'rgba(8,11,17,.95)',
+          border: '1px solid rgba(255,255,255,.08)',
+          boxShadow: '0 30px 90px rgba(0,0,0,.6)',
+          overflow: 'hidden',
+        },
+      }, imageWrap, bottomBar, panelClose)
 
       return h('div', {
         ref: rootRef,
@@ -1328,10 +1342,23 @@ window.__ModuleLoader__.load({
           position: 'fixed',
           inset: 0,
           zIndex: layer,
-          background: 'rgba(6,9,14,.94)',
+          background: 'transparent',
           fontFamily: 'inherit',
         },
-      }, stage, bottomBar)
+      }, h('div', {
+        ref: stageRef,
+        style: {
+          position: 'absolute',
+          inset: 0,
+          cursor: 'grab',
+          touchAction: 'none',
+          userSelect: 'none',
+        },
+        onPointerDown,
+        onPointerMove,
+        onPointerUp,
+        onPointerCancel: onPointerUp,
+      }, panel))
     }
 
     function DockButton(props) {
