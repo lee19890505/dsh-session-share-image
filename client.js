@@ -29,7 +29,7 @@ window.__ModuleLoader__.load({
       loadingOlder: 'Loading…',
       noOlder: 'No more',
       loadOlderHint: 'Load earlier messages that are not in the conversation window yet',
-      loadOlderFailed: 'Could not load earlier messages',
+      loadOlderFailed: 'Earlier messages are not available right now — scroll the conversation to the top, then try again.',
       selectedCount: '{count} selected',
       cancel: 'Close',
       download: 'Download PNG',
@@ -69,7 +69,7 @@ window.__ModuleLoader__.load({
       loadingOlder: '加载中…',
       noOlder: '没有更早了',
       loadOlderHint: '拉取还没加载进会话窗口的更早消息',
-      loadOlderFailed: '加载更早的消息失败',
+      loadOlderFailed: '暂时读不到更早的消息，先把会话滚到顶部再试一次。',
       selectedCount: '已选 {count} 条',
       cancel: '关闭',
       download: '下载 PNG',
@@ -701,21 +701,28 @@ window.__ModuleLoader__.load({
       const noteState = React.useState('')
       const note = noteState[0]
       const setNote = noteState[1]
+      const noteDetailState = React.useState('')
+      const noteDetail = noteDetailState[0]
+      const setNoteDetail = noteDetailState[1]
 
       const loadOlder = () => {
         if (!onLoadOlder || loadingOlder || exhausted) return
         setLoadingOlder(true)
         setNote('')
+        setNoteDetail('')
         Promise.resolve(onLoadOlder()).then((result) => {
           setLoadingOlder(false)
-          const ok = Boolean(result && result.ok)
-          if (ok) return
+          if (result && result.ok) return
           setExhausted(true)
-          setNote(t('loadOlderFailed') + (result && result.reason ? ' (' + result.reason + ')' : ''))
+          // Reaching the beginning is a normal end, not something to report.
+          if (result && result.exhausted) return
+          setNote(t('loadOlderFailed'))
+          if (result && result.reason) setNoteDetail(String(result.reason))
         }, (error) => {
           setLoadingOlder(false)
           setExhausted(true)
-          setNote(t('loadOlderFailed') + ' (' + String(error && error.message ? error.message : error) + ')')
+          setNote(t('loadOlderFailed'))
+          setNoteDetail(String(error && error.message ? error.message : error))
         })
       }
 
@@ -893,10 +900,12 @@ window.__ModuleLoader__.load({
       }, t('clearAll'))),
       note
         ? h('div', {
+          title: noteDetail || undefined,
           style: {
             fontSize: '11px',
             lineHeight: '1.4',
-            color: 'var(--dsw-alias-state-warn-primary, #b45309)',
+            paddingLeft: '2px',
+            color: 'var(--dsw-alias-label-secondary, #6b7280)',
             wordBreak: 'break-word',
           },
         }, note)
@@ -1478,9 +1487,10 @@ window.__ModuleLoader__.load({
           tick()
         })
 
+        let failure
         let chain = Promise.resolve()
         for (let page = 0; page < 2; page += 1) {
-          chain = chain.then(() => reader.loadOlder().catch(() => undefined))
+          chain = chain.then(() => reader.loadOlder().catch((error) => { failure = error }))
         }
         return chain
           .then(waitForGrowth)
@@ -1488,9 +1498,21 @@ window.__ModuleLoader__.load({
             const latest = latestRef.current
             const messages = collectMessages(latest.order, latest.nodes, t)
             setPayload((prev) => (prev ? { ...prev, messages } : prev))
-            return { ok, reason: ok ? '' : 'no older page returned' }
+            // No growth after a load that did not throw is the normal end of
+            // history, not a failure worth reporting.
+            if (ok) return { ok: true, exhausted: false, reason: '' }
+            if (!failure) return { ok: false, exhausted: true, reason: '' }
+            return {
+              ok: false,
+              exhausted: false,
+              reason: String(failure && failure.message ? failure.message : failure),
+            }
           })
-          .catch((error) => ({ ok: false, reason: String(error && error.message ? error.message : error) }))
+          .catch((error) => ({
+            ok: false,
+            exhausted: false,
+            reason: String(error && error.message ? error.message : error),
+          }))
       }, [props.hostCtx, sessionId, t])
 
       const button = h('button', {
