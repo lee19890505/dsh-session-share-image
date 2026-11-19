@@ -1404,44 +1404,56 @@ window.__ModuleLoader__.load({
       const latestRef = React.useRef({ order, nodes })
       latestRef.current = { order, nodes }
 
-      const canLoadOlder = React.useMemo(() => {
+      const getBinding = React.useCallback(() => {
         try {
           const sessions = props.hostCtx && props.hostCtx.sessions
-          const scope = sessions && typeof sessions.scope === 'function' ? sessions.scope(sessionId) : undefined
-          return Boolean(scope && scope.conversation && typeof scope.conversation.loadOlder === 'function')
+          if (!sessions || typeof sessions.binding !== 'function') return undefined
+          return sessions.binding(sessionId)
         } catch (error) {
-          return false
+          return undefined
         }
       }, [props.hostCtx, sessionId])
+
+      const canLoadOlder = React.useMemo(() => {
+        const binding = getBinding()
+        return Boolean(binding && typeof binding.loadOlder === 'function')
+      }, [getBinding])
 
       // The Chat window loads the newest turns first, so the earliest messages
       // can be absent from the snapshot until older history is pulled in.
       const loadOlder = React.useCallback(() => {
-        let scope
-        try {
-          const sessions = props.hostCtx && props.hostCtx.sessions
-          scope = sessions && typeof sessions.scope === 'function' ? sessions.scope(sessionId) : undefined
-        } catch (error) {
-          scope = undefined
-        }
-        const conversation = scope && scope.conversation
-        if (!conversation || typeof conversation.loadOlder !== 'function') return Promise.resolve(false)
+        const binding = getBinding()
+        if (!binding) return Promise.resolve(false)
         const before = latestRef.current.order ? latestRef.current.order.length : 0
+
+        const grown = () => {
+          const latest = latestRef.current
+          return (latest.order ? latest.order.length : 0) > before
+        }
+        const waitForGrowth = () => new Promise((resolve) => {
+          const deadline = Date.now() + 1500
+          const tick = () => {
+            if (grown()) { resolve(true); return }
+            if (Date.now() > deadline) { resolve(false); return }
+            setTimeout(tick, 60)
+          }
+          tick()
+        })
+
         let chain = Promise.resolve()
-        for (let page = 0; page < 3; page += 1) {
-          chain = chain.then(() => conversation.loadOlder().catch(() => undefined))
+        for (let page = 0; page < 2; page += 1) {
+          chain = chain.then(() => binding.loadOlder().catch(() => undefined))
         }
         return chain
-          .then(() => new Promise((resolve) => setTimeout(resolve, 160)))
-          .then(() => {
+          .then(waitForGrowth)
+          .then((ok) => {
             const latest = latestRef.current
-            const after = latest.order ? latest.order.length : 0
             const messages = collectMessages(latest.order, latest.nodes, t)
             setPayload((prev) => (prev ? { ...prev, messages } : prev))
-            return after > before
+            return ok
           })
           .catch(() => false)
-      }, [props.hostCtx, sessionId, t])
+      }, [getBinding, t])
 
       const button = h('button', {
         type: 'button',
