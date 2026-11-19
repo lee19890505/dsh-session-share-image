@@ -1,0 +1,3 @@
+- insert:
+    - id: session-share-image
+      name: '@local/session-share-image'
