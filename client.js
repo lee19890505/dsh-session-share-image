@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Session share image: pick messages from the current conversation and export
  * them as one PNG, so a transcript can be shared without a screenshot.
  *
@@ -25,6 +25,10 @@ window.__ModuleLoader__.load({
       dialogHint: 'Pick the messages to include; the preview follows your selection.',
       selectAll: 'All',
       clearAll: 'None',
+      loadOlder: 'Load earlier',
+      loadingOlder: 'Loading…',
+      noOlder: 'No more',
+      loadOlderHint: 'Load earlier messages that are not in the conversation window yet',
       selectedCount: '{count} selected',
       cancel: 'Close',
       download: 'Download PNG',
@@ -60,6 +64,10 @@ window.__ModuleLoader__.load({
       dialogHint: '勾选要包含的消息，预览会随选择更新。',
       selectAll: '全选',
       clearAll: '清空',
+      loadOlder: '加载更早',
+      loadingOlder: '加载中…',
+      noOlder: '没有更早了',
+      loadOlderHint: '拉取还没加载进会话窗口的更早消息',
       selectedCount: '已选 {count} 条',
       cancel: '关闭',
       download: '下载 PNG',
@@ -580,11 +588,27 @@ window.__ModuleLoader__.load({
       const payload = props.payload
       const t = props.t || ((key) => key)
       const onClose = props.onClose
+      const onLoadOlder = props.onLoadOlder
       const messages = payload.messages
 
-      const selectionState = React.useState(() => messages.map(() => true))
+      const selectionState = React.useState(() => new Set(messages.map((message) => message.key)))
       const selection = selectionState[0]
       const setSelection = selectionState[1]
+
+      const knownKeysRef = React.useRef(new Set(messages.map((message) => message.key)))
+
+      // Newly pulled history joins the selection already made.
+      React.useEffect(() => {
+        const known = knownKeysRef.current
+        const added = messages.filter((message) => !known.has(message.key))
+        if (!added.length) return
+        for (const message of added) known.add(message.key)
+        setSelection((prev) => {
+          const next = new Set(prev)
+          for (const message of added) next.add(message.key)
+          return next
+        })
+      }, [messages, setSelection])
 
       const themeState = React.useState(payload.light ? 'light' : 'dark')
       const mode = themeState[0]
@@ -622,7 +646,7 @@ window.__ModuleLoader__.load({
       }, [onClose, zoom])
 
       const chosen = React.useMemo(
-        () => messages.filter((_, index) => selection[index]),
+        () => messages.filter((message) => selection.has(message.key)),
         [messages, selection],
       )
 
@@ -650,14 +674,39 @@ window.__ModuleLoader__.load({
         return () => { cancelled = true; clearTimeout(timer) }
       }, [chosen, mode, payload, t])
 
-      const toggle = (index) => {
-        setSelection((prev) => prev.map((value, at) => (at === index ? !value : value)))
+      const toggle = (key) => {
+        setSelection((prev) => {
+          const next = new Set(prev)
+          if (next.has(key)) next.delete(key)
+          else next.add(key)
+          return next
+        })
         setStatus('')
       }
 
-      const allOn = selection.every(Boolean)
-      const noneOn = selection.every((value) => !value)
+      const allOn = messages.length > 0 && messages.every((message) => selection.has(message.key))
+      const noneOn = messages.every((message) => !selection.has(message.key))
       const downloadDisabled = !chosen.length || preview.busy || !preview.url
+
+      const loadingState = React.useState(false)
+      const loadingOlder = loadingState[0]
+      const setLoadingOlder = loadingState[1]
+
+      const exhaustedState = React.useState(false)
+      const exhausted = exhaustedState[0]
+      const setExhausted = exhaustedState[1]
+
+      const loadOlder = () => {
+        if (!onLoadOlder || loadingOlder || exhausted) return
+        setLoadingOlder(true)
+        Promise.resolve(onLoadOlder()).then((changed) => {
+          setLoadingOlder(false)
+          if (!changed) setExhausted(true)
+        }, () => {
+          setLoadingOlder(false)
+          setExhausted(true)
+        })
+      }
 
       const onDownload = () => {
         if (!canvasRef.current || !chosen.length) return
@@ -748,15 +797,15 @@ window.__ModuleLoader__.load({
           padding: '9px 10px',
           borderRadius: '8px',
           cursor: 'pointer',
-          background: selection[index]
+          background: selection.has(message.key)
             ? 'var(--dsw-alias-bg-layer-3, rgba(127,127,127,.10))'
             : 'transparent',
         },
       },
       h('input', {
         type: 'checkbox',
-        checked: Boolean(selection[index]),
-        onChange: () => toggle(index),
+        checked: selection.has(message.key),
+        onChange: () => toggle(message.key),
         style: { marginTop: '3px', flex: '0 0 auto' },
       }),
       h('div', { style: { minWidth: 0, flex: '1 1 auto' } },
@@ -810,15 +859,24 @@ window.__ModuleLoader__.load({
         },
       },
       h('span', { style: { flex: '1 1 auto' } }, t('selectedCount', { count: String(chosen.length) })),
+      onLoadOlder
+        ? h('button', {
+          type: 'button',
+          onClick: loadOlder,
+          disabled: loadingOlder || exhausted,
+          title: t('loadOlderHint'),
+          style: textButtonStyle(loadingOlder || exhausted),
+        }, loadingOlder ? t('loadingOlder') : exhausted ? t('noOlder') : t('loadOlder'))
+        : null,
       h('button', {
         type: 'button',
-        onClick: () => { setSelection(messages.map(() => true)); setStatus('') },
+        onClick: () => { setSelection(new Set(messages.map((message) => message.key))); setStatus('') },
         disabled: allOn,
         style: textButtonStyle(allOn),
       }, t('selectAll')),
       h('button', {
         type: 'button',
-        onClick: () => { setSelection(messages.map(() => false)); setStatus('') },
+        onClick: () => { setSelection(new Set()); setStatus('') },
         disabled: noneOn,
         style: textButtonStyle(noneOn),
       }, t('clearAll'))),
@@ -1209,29 +1267,26 @@ window.__ModuleLoader__.load({
         },
       }, t('download')),
       status ? h('span', {
-        style: { fontSize: '11px', color: 'rgba(255,255,255,.68)', marginLeft: '4px' },
-      }, status) : null)
-
-      const closeButton = h('button', {
+        style: { fontSize: '11px', color: 'rgba(255,255,255,.68)', marginLeft: '4px', marginRight: '4px' },
+      }, status) : null,
+      h('button', {
         type: 'button',
         onClick: onClose,
         'aria-label': t('cancel'),
         title: t('cancel'),
         style: {
-          position: 'absolute',
-          top: '14px',
-          right: '16px',
-          width: '32px',
           height: '32px',
+          padding: '0 14px',
           borderRadius: '8px',
           border: '1px solid rgba(255,255,255,.22)',
           background: 'rgba(12,16,24,.7)',
           color: '#ffffff',
-          fontSize: '16px',
+          fontSize: '13px',
+          fontFamily: 'inherit',
           lineHeight: '1',
           cursor: 'pointer',
         },
-      }, '\u00d7')
+      }, t('cancel')))
 
       const stage = h('div', {
         ref: stageRef,
@@ -1276,7 +1331,7 @@ window.__ModuleLoader__.load({
           background: 'rgba(6,9,14,.94)',
           fontFamily: 'inherit',
         },
-      }, stage, bottomBar, closeButton)
+      }, stage, bottomBar)
     }
 
     function DockButton(props) {
@@ -1316,6 +1371,48 @@ window.__ModuleLoader__.load({
 
       const close = React.useCallback(() => setPayload(null), [])
 
+      const latestRef = React.useRef({ order, nodes })
+      latestRef.current = { order, nodes }
+
+      const canLoadOlder = React.useMemo(() => {
+        try {
+          const sessions = props.hostCtx && props.hostCtx.sessions
+          const scope = sessions && typeof sessions.scope === 'function' ? sessions.scope(sessionId) : undefined
+          return Boolean(scope && scope.conversation && typeof scope.conversation.loadOlder === 'function')
+        } catch (error) {
+          return false
+        }
+      }, [props.hostCtx, sessionId])
+
+      // The Chat window loads the newest turns first, so the earliest messages
+      // can be absent from the snapshot until older history is pulled in.
+      const loadOlder = React.useCallback(() => {
+        let scope
+        try {
+          const sessions = props.hostCtx && props.hostCtx.sessions
+          scope = sessions && typeof sessions.scope === 'function' ? sessions.scope(sessionId) : undefined
+        } catch (error) {
+          scope = undefined
+        }
+        const conversation = scope && scope.conversation
+        if (!conversation || typeof conversation.loadOlder !== 'function') return Promise.resolve(false)
+        const before = latestRef.current.order ? latestRef.current.order.length : 0
+        let chain = Promise.resolve()
+        for (let page = 0; page < 3; page += 1) {
+          chain = chain.then(() => conversation.loadOlder().catch(() => undefined))
+        }
+        return chain
+          .then(() => new Promise((resolve) => setTimeout(resolve, 160)))
+          .then(() => {
+            const latest = latestRef.current
+            const after = latest.order ? latest.order.length : 0
+            const messages = collectMessages(latest.order, latest.nodes, t)
+            setPayload((prev) => (prev ? { ...prev, messages } : prev))
+            return after > before
+          })
+          .catch(() => false)
+      }, [props.hostCtx, sessionId, t])
+
       const button = h('button', {
         type: 'button',
         title: t('buttonHint'),
@@ -1351,7 +1448,13 @@ window.__ModuleLoader__.load({
       return h(React.Fragment, null,
         button,
         createPortal(
-          h(Modal, { key: payload.createdAt, payload, t, onClose: close }),
+          h(Modal, {
+            key: payload.createdAt,
+            payload,
+            t,
+            onClose: close,
+            onLoadOlder: canLoadOlder ? loadOlder : null,
+          }),
           document.body,
         ))
     }
@@ -1366,12 +1469,16 @@ window.__ModuleLoader__.load({
           'session-share-image: locale dictionaries',
         )
 
+        // The seat component needs the host context to pull older history for
+        // this session; a closure keeps that out of the slot props contract.
+        const DockSeat = (props) => h(DockButton, { ...props, hostCtx: ctx })
+
         ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
           name: 'conversation.composer.dock',
           id: SLOT_ID,
           order: 6,
           locale: NS,
-        }, DockButton))
+        }, DockSeat))
       },
     }
   },
