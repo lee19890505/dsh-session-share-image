@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Session share image: pick messages from the current conversation and export
  * them as one PNG, so a transcript can be shared without a screenshot.
  *
@@ -6,14 +6,14 @@
  * opens a picker dialog rendered through a portal into the page body.
  */
 window.__ModuleLoader__.load({
-  id: '@local/session-share-image',
+  id: 'dsh-session-share-image',
   factory(require) {
     const React = require('react')
     const reactDom = require('react-dom')
     const h = React.createElement
     const createPortal = reactDom.createPortal
 
-    const NS = '@local/session-share-image'
+    const NS = 'dsh-session-share-image'
     const SLOT_ID = 'session-share-image'
 
     // ---------------------------------------------------------------- locale

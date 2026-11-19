@@ -1,7 +1,6 @@
 {
-  "name": "@local/session-share-image",
+  "name": "dsh-session-share-image",
   "version": "1.0.0",
-  "private": true,
   "description": "Export selected DeepSeek Harness conversation messages as one shareable PNG image",
   "license": "MIT",
   "keywords": ["dsh", "deepseek-harness", "plugin", "session", "export", "image"],
