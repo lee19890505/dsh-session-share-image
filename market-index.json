@@ -19,16 +19,32 @@
         "en": "Adds a Share as image pill beside the composer. Pick any messages of the current conversation, preview the result in light or dark, then copy the image to the clipboard or download it as one PNG.",
         "zh": "在输入框旁增加“分享为图片”按钮。勾选当前会话里的任意消息，浅色/深色实时预览，然后把图片复制到剪贴板或下载成一张 PNG。"
       },
-      "icon": "https://raw.githubusercontent.com/lee19890505/dsh-session-share-image/3d4e12d397ed28d88878fb9b5f0cd334a49b4856/icon.svg",
+      "icon": "https://raw.githubusercontent.com/lee19890505/dsh-session-share-image/8228450f66f46bd40e15d38d5c9e84198a2fc7d6/icon.svg",
       "author": "lee19890505",
       "homepage": "https://github.com/lee19890505/dsh-session-share-image",
       "repository": {
         "url": "https://github.com/lee19890505/dsh-session-share-image"
       },
       "metadata": {
-        "keywords": ["dsh", "deepseek-harness", "plugin", "session", "export", "image"]
+        "keywords": [
+          "dsh",
+          "deepseek-harness",
+          "plugin",
+          "session",
+          "export",
+          "image"
+        ]
       },
       "versions": [
+        {
+          "version": "1.0.3",
+          "publishTimestamp": 1795083885,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lee19890505/dsh-session-share-image.git",
+            "commit": "8228450f66f46bd40e15d38d5c9e84198a2fc7d6"
+          }
+        },
         {
           "version": "1.0.2",
           "publishTimestamp": 1795083732,
