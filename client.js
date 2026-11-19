@@ -29,6 +29,7 @@ window.__ModuleLoader__.load({
       loadingOlder: 'Loading…',
       noOlder: 'No more',
       loadOlderHint: 'Load earlier messages that are not in the conversation window yet',
+      loadOlderFailed: 'Could not load earlier messages',
       selectedCount: '{count} selected',
       cancel: 'Close',
       download: 'Download PNG',
@@ -68,6 +69,7 @@ window.__ModuleLoader__.load({
       loadingOlder: '加载中…',
       noOlder: '没有更早了',
       loadOlderHint: '拉取还没加载进会话窗口的更早消息',
+      loadOlderFailed: '加载更早的消息失败',
       selectedCount: '已选 {count} 条',
       cancel: '关闭',
       download: '下载 PNG',
@@ -696,15 +698,24 @@ window.__ModuleLoader__.load({
       const exhausted = exhaustedState[0]
       const setExhausted = exhaustedState[1]
 
+      const noteState = React.useState('')
+      const note = noteState[0]
+      const setNote = noteState[1]
+
       const loadOlder = () => {
         if (!onLoadOlder || loadingOlder || exhausted) return
         setLoadingOlder(true)
-        Promise.resolve(onLoadOlder()).then((changed) => {
+        setNote('')
+        Promise.resolve(onLoadOlder()).then((result) => {
           setLoadingOlder(false)
-          if (!changed) setExhausted(true)
-        }, () => {
+          const ok = Boolean(result && result.ok)
+          if (ok) return
+          setExhausted(true)
+          setNote(t('loadOlderFailed') + (result && result.reason ? ' (' + result.reason + ')' : ''))
+        }, (error) => {
           setLoadingOlder(false)
           setExhausted(true)
+          setNote(t('loadOlderFailed') + ' (' + String(error && error.message ? error.message : error) + ')')
         })
       }
 
@@ -880,6 +891,16 @@ window.__ModuleLoader__.load({
         disabled: noneOn,
         style: textButtonStyle(noneOn),
       }, t('clearAll'))),
+      note
+        ? h('div', {
+          style: {
+            fontSize: '11px',
+            lineHeight: '1.4',
+            color: 'var(--dsw-alias-state-warn-primary, #b45309)',
+            wordBreak: 'break-word',
+          },
+        }, note)
+        : null,
       h('div', {
         style: {
           overflowY: 'auto',
@@ -1404,34 +1425,51 @@ window.__ModuleLoader__.load({
       const latestRef = React.useRef({ order, nodes })
       latestRef.current = { order, nodes }
 
-      const getBinding = React.useCallback(() => {
+      const resolveBinding = () => {
+        const host = props.hostCtx
+        if (!host) return { binding: undefined, reason: 'no host context' }
+        let sessions
         try {
-          const sessions = props.hostCtx && props.hostCtx.sessions
-          if (!sessions || typeof sessions.binding !== 'function') return undefined
-          return sessions.binding(sessionId)
+          sessions = typeof host.get === 'function' ? host.get('sessions') : undefined
         } catch (error) {
-          return undefined
+          sessions = undefined
         }
-      }, [props.hostCtx, sessionId])
-
-      const canLoadOlder = React.useMemo(() => {
-        const binding = getBinding()
-        return Boolean(binding && typeof binding.loadOlder === 'function')
-      }, [getBinding])
+        if (!sessions) {
+          try { sessions = host.sessions } catch (error) { sessions = undefined }
+        }
+        if (!sessions) return { binding: undefined, reason: 'sessions service unavailable' }
+        let binding
+        try {
+          binding = typeof sessions.binding === 'function' ? sessions.binding(sessionId) : undefined
+        } catch (error) {
+          return { binding: undefined, reason: 'binding threw: ' + (error && error.message ? error.message : String(error)) }
+        }
+        if (!binding) return { binding: undefined, reason: 'no binding for this session' }
+        return { binding, reason: '' }
+      }
 
       // The Chat window loads the newest turns first, so the earliest messages
       // can be absent from the snapshot until older history is pulled in.
       const loadOlder = React.useCallback(() => {
-        const binding = getBinding()
-        if (!binding) return Promise.resolve(false)
-        const before = latestRef.current.order ? latestRef.current.order.length : 0
+        const resolved = resolveBinding()
+        const binding = resolved.binding
+        if (!binding) return Promise.resolve({ ok: false, reason: resolved.reason })
+        const reader = typeof binding.loadOlder === 'function'
+          ? binding
+          : (binding.session && typeof binding.session.loadOlder === 'function' ? binding.session : undefined)
+        if (!reader) {
+          let keys = ''
+          try { keys = Object.keys(binding).slice(0, 16).join('|') } catch (error) { keys = '?' }
+          return Promise.resolve({ ok: false, reason: 'binding has no loadOlder [' + keys + ']' })
+        }
 
+        const before = latestRef.current.order ? latestRef.current.order.length : 0
         const grown = () => {
           const latest = latestRef.current
           return (latest.order ? latest.order.length : 0) > before
         }
         const waitForGrowth = () => new Promise((resolve) => {
-          const deadline = Date.now() + 1500
+          const deadline = Date.now() + 2000
           const tick = () => {
             if (grown()) { resolve(true); return }
             if (Date.now() > deadline) { resolve(false); return }
@@ -1442,7 +1480,7 @@ window.__ModuleLoader__.load({
 
         let chain = Promise.resolve()
         for (let page = 0; page < 2; page += 1) {
-          chain = chain.then(() => binding.loadOlder().catch(() => undefined))
+          chain = chain.then(() => reader.loadOlder().catch(() => undefined))
         }
         return chain
           .then(waitForGrowth)
@@ -1450,10 +1488,10 @@ window.__ModuleLoader__.load({
             const latest = latestRef.current
             const messages = collectMessages(latest.order, latest.nodes, t)
             setPayload((prev) => (prev ? { ...prev, messages } : prev))
-            return ok
+            return { ok, reason: ok ? '' : 'no older page returned' }
           })
-          .catch(() => false)
-      }, [getBinding, t])
+          .catch((error) => ({ ok: false, reason: String(error && error.message ? error.message : error) }))
+      }, [props.hostCtx, sessionId, t])
 
       const button = h('button', {
         type: 'button',
@@ -1495,7 +1533,7 @@ window.__ModuleLoader__.load({
             payload,
             t,
             onClose: close,
-            onLoadOlder: canLoadOlder ? loadOlder : null,
+            onLoadOlder: loadOlder,
           }),
           document.body,
         ))
