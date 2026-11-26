@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Session share image",
-    "description": "Adds a Share as image pill beside the composer. It opens a picker listing the conversation's user and assistant messages; choose any subset, compare the light and dark preview, then copy the image to the clipboard or download it as one PNG. The image carries the session title, per-message times, and message text, with Markdown headings, lists, quotes, and code blocks rendered; images, file attachments, reasoning, and tool calls are left out. Everything runs in the page — no message leaves the machine and no extra model request is made.",
+    "description": "Adds a Share as image pill beside the composer. It opens a picker listing the conversation's user and assistant messages; choose any subset, compare the light and dark preview, then copy the image to the clipboard or download it as one PNG. The image carries the session title, per-message times, and message text, with Markdown headings, lists, quotes, tables, and code blocks (language-tagged) rendered; images, file attachments, reasoning, and tool calls are left out. Everything runs in the page — no message leaves the machine and no extra model request is made.",
     "detail": "docs/DETAIL.md"
   }
 }

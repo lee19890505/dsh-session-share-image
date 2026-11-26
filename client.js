@@ -173,6 +173,8 @@ window.__ModuleLoader__.load({
 
     function inlineText(text) {
       return String(text)
+        .replace(/<br\s*\/?>/gi, ' ')
+        .replace(/<\/?(?:b|i|em|strong|code|p|div|span|sub|sup|u|s|del|small|kbd|mark|font)\b[^>]*>/gi, '')
         .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
         .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
         .replace(/`([^`]+)`/g, '$1')
@@ -182,40 +184,91 @@ window.__ModuleLoader__.load({
         .replace(/\u200b|\ufeff/g, '')
     }
 
+    /** Split a GFM pipe-table row into trimmed cells; `\|` stays inside its cell. */
+    function splitRow(line) {
+      const body = String(line).trim().replace(/^\|/, '').replace(/\|$/, '')
+      const cells = []
+      let cell = ''
+      for (let i = 0; i < body.length; i += 1) {
+        const ch = body[i]
+        if (ch === '\\' && body[i + 1] === '|') { cell += '|'; i += 1; continue }
+        if (ch === '|') { cells.push(cell); cell = ''; continue }
+        cell += ch
+      }
+      cells.push(cell)
+      return cells.map(c => c.trim())
+    }
+
+    const TABLE_SEP = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/
+    const FENCE = /^\s*(`{3,}|~{3,})\s*(.*)$/
+
+    function cellAlign(cell) {
+      const c = String(cell).trim()
+      if (/^:-+:$/.test(c)) return 'center'
+      if (/^-+:$/.test(c)) return 'right'
+      return 'left'
+    }
+
     /** Split Markdown into the small block vocabulary the canvas renderer knows. */
     function parseBlocks(text) {
       const lines = String(text).replace(/\r\n?/g, '\n').split('\n')
       const blocks = []
-      let inCode = false
-      let codeLines = []
-      let para = []
+      const para = []
 
       const flushPara = () => {
         if (!para.length) return
         blocks.push({ type: 'p', text: inlineText(joinSoftLines(para)) })
-        para = []
+        para.length = 0
       }
 
-      for (const line of lines) {
-        if (/^\s*```/.test(line)) {
-          if (inCode) {
-            blocks.push({ type: 'code', text: codeLines.join('\n') })
-            codeLines = []
-            inCode = false
-          } else {
-            flushPara()
-            inCode = true
+      let i = 0
+      while (i < lines.length) {
+        const line = lines[i]
+
+        const fence = FENCE.exec(line)
+        if (fence) {
+          flushPara()
+          const marker = fence[1]
+          const close = new RegExp('^\\s*' + marker[0] + '{' + marker.length + ',}\\s*$')
+          const body = []
+          i += 1
+          while (i < lines.length && !close.test(lines[i])) {
+            body.push(lines[i].replace(/\t/g, '  '))
+            i += 1
           }
+          const closed = i < lines.length
+          i += 1
+          if (!closed) while (body.length && !body[body.length - 1].trim()) body.pop()
+          blocks.push({ type: 'code', lang: (fence[2] || '').trim().split(/[\s{,]/)[0].slice(0, 24), text: body.join('\n') })
           continue
         }
-        if (inCode) { codeLines.push(line.replace(/\t/g, '  ')); continue }
-        if (!line.trim()) { flushPara(); continue }
-        const heading = /^(#{1,6})\s+(.*)$/.exec(line)
-        if (heading) {
+
+        if (line.includes('|') && i + 1 < lines.length && TABLE_SEP.test(lines[i + 1])
+          && splitRow(line).length >= 2) {
+          flushPara()
+          const head = splitRow(line)
+          const aligns = splitRow(lines[i + 1]).map(cellAlign)
+          const rows = []
+          i += 2
+          while (i < lines.length && lines[i].trim() && lines[i].includes('|')
+            && !TABLE_SEP.test(lines[i])) {
+            rows.push(splitRow(lines[i]).map(inlineText))
+            i += 1
+          }
+          blocks.push({ type: 'table', head: head.map(inlineText), rows, aligns })
+          continue
+        }
+
+        if (!line.trim()) { flushPara(); i += 1; continue }
+
+        const heading = /^\s{0,3}(#{1,6})[ \t\u00a0\u3000]*(.+?)[ \t\u00a0\u3000]*#*[ \t\u00a0\u3000]*$/.exec(line)
+        if (heading && heading[2].trim() && !/^#+$/.test(heading[2].trim())) {
           flushPara()
           blocks.push({ type: 'h', level: Math.min(3, heading[1].length), text: inlineText(heading[2]) })
+          i += 1
           continue
         }
+
         const bullet = /^\s*([-*+]|\d+[.)])\s+(.*)$/.exec(line)
         if (bullet) {
           flushPara()
@@ -223,18 +276,24 @@ window.__ModuleLoader__.load({
             ? bullet[1].replace(/[.)]$/, '') + '.'
             : '•'
           blocks.push({ type: 'li', marker, text: inlineText(bullet[2]) })
+          i += 1
           continue
         }
+
         const quote = /^\s*>\s?(.*)$/.exec(line)
         if (quote) {
           flushPara()
           blocks.push({ type: 'quote', text: inlineText(quote[1]) })
+          i += 1
           continue
         }
-        if (/^\s*([-*_])\1{2,}\s*$/.test(line)) { flushPara(); blocks.push({ type: 'hr' }); continue }
+
+        if (/^\s*([-*_])\1{2,}\s*$/.test(line)) { flushPara(); blocks.push({ type: 'hr' }); i += 1; continue }
+
         para.push(line)
+        i += 1
       }
-      if (inCode && codeLines.length) blocks.push({ type: 'code', text: codeLines.join('\n') })
+
       flushPara()
       return blocks
     }
@@ -249,6 +308,7 @@ window.__ModuleLoader__.load({
       meta: '400 17px ' + FAMILY,
       chip: '700 13px ' + FAMILY,
       body: '400 19px ' + FAMILY,
+      bold: '700 19px ' + FAMILY,
       h1: '700 26px ' + FAMILY,
       h2: '700 22px ' + FAMILY,
       h3: '700 20px ' + FAMILY,
@@ -267,6 +327,7 @@ window.__ModuleLoader__.load({
         userFg: '#1d4ed8', userBg: '#e8efff',
         aiFg: '#04715a', aiBg: '#e2f6ee',
         codeBg: '#f4f6fa', codeText: '#2b3340',
+        tableBg: '#fcfdff', tableHeadBg: '#edf1f9', tableLine: '#dde3ee',
         quoteBar: '#d6dce7',
       },
       dark: {
@@ -278,6 +339,7 @@ window.__ModuleLoader__.load({
         userFg: '#bcd0ff', userBg: '#1d2a4a',
         aiFg: '#93e6c6', aiBg: '#12322a',
         codeBg: '#19222f', codeText: '#d5dfee',
+        tableBg: '#151d2b', tableHeadBg: '#1d2738', tableLine: '#2c3850',
         quoteBar: '#33405a',
       },
     }
@@ -323,6 +385,92 @@ window.__ModuleLoader__.load({
       if (!ms) return ''
       const d = new Date(ms)
       return pad2(d.getHours()) + ':' + pad2(d.getMinutes())
+    }
+
+    // --------------------------------------------------------------- tables
+
+    const TABLE = { padX: 14, padY: 12, min: 76, lh: 28, headLh: 28 }
+
+    /** Measure a Markdown table: column widths, wrapped cell lines, total height. */
+    function layoutTable(ctx, block, avail) {
+      const head = Array.isArray(block.head) ? block.head : []
+      const body = Array.isArray(block.rows) ? block.rows : []
+      const cols = Math.max(1, head.length, ...body.map(row => row.length))
+
+      const pad = (cells) => {
+        const out = cells.slice(0, cols)
+        while (out.length < cols) out.push('')
+        return out
+      }
+      const headCells = pad(head)
+      const rows = body.map(pad)
+      const aligns = pad(block.aligns || []).map(a => a || 'left')
+
+      const measure = (txt, font) => { ctx.font = font; return ctx.measureText(txt || '').width }
+      const natural = headCells.map((txt, c) => {
+        let w = measure(txt, FONTS.bold)
+        for (const row of rows) w = Math.max(w, measure(row[c], FONTS.body))
+        return Math.min(avail, Math.ceil(w) + TABLE.padX * 2)
+      })
+
+      const gutters = Math.max(0, cols - 1)
+      const target = Math.max(cols * TABLE.min + gutters, avail)
+      let widths = natural.slice()
+      const naturalTotal = widths.reduce((a, b) => a + b, 0)
+      if (naturalTotal <= target - gutters) {
+        const extra = target - gutters - naturalTotal
+        widths = widths.map(w => w + extra * (w / (naturalTotal || 1)))
+      } else {
+        const slack = widths.map(w => Math.max(0, w - TABLE.min))
+        const slackSum = slack.reduce((a, b) => a + b, 0)
+        const shrink = slackSum ? Math.min(1, (naturalTotal - (target - gutters)) / slackSum) : 0
+        widths = widths.map((w, idx) => w - slack[idx] * shrink)
+      }
+      widths = widths.map(w => Math.max(TABLE.min, Math.floor(w)))
+      let sum = widths.reduce((a, b) => a + b, 0)
+      if (sum + gutters > avail) {
+        const scale = (avail - gutters) / sum
+        widths = widths.map(w => Math.max(40, Math.floor(w * scale)))
+        sum = widths.reduce((a, b) => a + b, 0)
+      } else {
+        widths[widths.length - 1] += avail - gutters - sum
+      }
+
+      const wrapCell = (txt, font, w) => wrapLines(ctx, txt, Math.max(24, w - TABLE.padX * 2), font)
+
+      const headLines = headCells.map((txt, c) => wrapCell(txt, FONTS.bold, widths[c]))
+      const headH = Math.max(1, ...headLines.map(l => l.length)) * TABLE.headLh + TABLE.padY * 2
+
+      const rowLayout = rows.map((row) => {
+        const lines = row.map((txt, c) => wrapCell(txt, FONTS.body, widths[c]))
+        return { lines, h: Math.max(1, ...lines.map(l => l.length)) * TABLE.lh + TABLE.padY * 2 }
+      })
+
+      return {
+        cols,
+        widths,
+        aligns,
+        headLines,
+        headH,
+        rows: rowLayout,
+        height: headH + rowLayout.reduce((a, r) => a + r.h, 0),
+      }
+    }
+
+    /** Draw a wrapped, column-aligned cell block. */
+    function drawTableText(ctx, lines, font, color, colX, colW, align, baseY, lh) {
+      ctx.font = font
+      ctx.fillStyle = color
+      let ly = baseY
+      for (const line of lines) {
+        const x = align === 'right'
+          ? colX + colW - TABLE.padX - ctx.measureText(line).width
+          : align === 'center'
+            ? colX + (colW - ctx.measureText(line).width) / 2
+            : colX + TABLE.padX
+        ctx.fillText(line, x, ly)
+        ly += lh
+      }
     }
 
     /** Measure the whole document once, producing the drawing operations. */
@@ -384,12 +532,15 @@ window.__ModuleLoader__.load({
           } else if (block.type === 'hr') {
             ops.push({ t: 'hr', color: P.rule, mt: 20 })
           } else if (block.type === 'code') {
+            const lang = block.lang || ''
             ops.push({
-              t: 'code',
+              t: 'code', lang,
               lines: wrapLines(ctx, block.text, inner - 36, FONTS.code),
               font: FONTS.code, color: P.codeText, bg: P.codeBg,
-              lh: 26, mt: 16, pad: 18,
+              lh: 26, mt: 16, pad: 18, labelPad: lang ? 24 : 0,
             })
+          } else if (block.type === 'table') {
+            ops.push({ t: 'table', mt: 18, ...layoutTable(ctx, block, inner) })
           }
         }
       }
@@ -410,7 +561,8 @@ window.__ModuleLoader__.load({
 
     function opHeight(op) {
       if (op.t === 'text' || op.t === 'quote') return op.lines.length * op.lh
-      if (op.t === 'code') return op.pad * 2 + op.lines.length * op.lh
+      if (op.t === 'code') return op.pad * 2 + (op.labelPad || 0) + op.lines.length * op.lh
+      if (op.t === 'table') return op.height
       if (op.t === 'row') return 30
       if (op.t === 'bar') return op.h
       if (op.t === 'hr') return 1
@@ -489,12 +641,65 @@ window.__ModuleLoader__.load({
           ctx.fillStyle = op.bg
           roundRect(ctx, left, y, layout.inner, codeH, 10)
           ctx.fill()
+          if (op.lang) {
+            ctx.font = FONTS.foot
+            ctx.fillStyle = P.muted
+            const labelW = ctx.measureText(op.lang).width
+            ctx.fillText(op.lang, right - 18 - labelW, y + 24)
+          }
           ctx.font = op.font
           ctx.fillStyle = op.color
-          let lineY = y + op.pad + op.lh * 0.72
+          let lineY = y + op.pad + (op.labelPad || 0) + op.lh * 0.72
           for (const line of op.lines) {
             ctx.fillText(line, left + 18, lineY)
             lineY += op.lh
+          }
+        } else if (op.t === 'table') {
+          const tableH = op.height
+          const tableW = layout.inner
+          ctx.fillStyle = P.tableBg
+          roundRect(ctx, left, y, tableW, tableH, 12)
+          ctx.fill()
+
+          ctx.save()
+          roundRect(ctx, left, y, tableW, tableH, 12)
+          ctx.clip()
+          ctx.fillStyle = P.tableHeadBg
+          ctx.fillRect(left, y, tableW, op.headH)
+          ctx.fillStyle = P.tableLine
+          ctx.fillRect(left, y + op.headH - 1, tableW, 1)
+          let rowTop = y + op.headH
+          for (const row of op.rows) {
+            rowTop += row.h
+            if (rowTop < y + tableH - 1) ctx.fillRect(left, rowTop - 1, tableW, 1)
+          }
+          let colX = left
+          for (let c = 0; c < op.cols - 1; c += 1) {
+            colX += op.widths[c]
+            ctx.fillRect(colX, y, 1, tableH)
+          }
+          ctx.restore()
+
+          ctx.strokeStyle = P.tableLine
+          ctx.lineWidth = 1
+          roundRect(ctx, left + 0.5, y + 0.5, tableW - 1, tableH - 1, 12)
+          ctx.stroke()
+
+          let cellX = left
+          op.headLines.forEach((lines, c) => {
+            drawTableText(ctx, lines, FONTS.bold, P.text, cellX, op.widths[c],
+              op.aligns[c], y + TABLE.padY + TABLE.headLh * 0.72, TABLE.headLh)
+            cellX += op.widths[c]
+          })
+          let bodyTop = y + op.headH
+          for (const row of op.rows) {
+            cellX = left
+            row.lines.forEach((lines, c) => {
+              drawTableText(ctx, lines, FONTS.body, P.text, cellX, op.widths[c],
+                op.aligns[c], bodyTop + TABLE.padY + TABLE.lh * 0.72, TABLE.lh)
+              cellX += op.widths[c]
+            })
+            bodyTop += row.h
           }
         }
         y += opHeight(op)
